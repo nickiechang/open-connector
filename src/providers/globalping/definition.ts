@@ -7,7 +7,7 @@ const service = "globalping";
 export const provider: ProviderDefinition = {
   service,
   displayName: "Globalping",
-  categories: ["Developer Tools", "Data & Analytics"],
+  categories: ["Developer Tools", "Data"],
   authTypes: ["api_key"],
   auth: [
     {

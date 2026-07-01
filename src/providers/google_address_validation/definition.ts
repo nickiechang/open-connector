@@ -7,7 +7,7 @@ const service = "google_address_validation";
 export const provider: ProviderDefinition = {
   service,
   displayName: "Google Address Validation",
-  categories: ["Location", "Data & Analytics"],
+  categories: ["Location", "Data"],
   authTypes: ["api_key"],
   auth: [
     {
