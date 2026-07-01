@@ -223,6 +223,7 @@ The console helps you:
 
 - Browse providers and connection status.
 - Save API keys or OAuth client configuration.
+- Create and revoke runtime API tokens for agents and clients.
 - Inspect action schemas, scopes, and execution status.
 - Run an action from the browser for debugging.
 - Review recent local runs.
@@ -243,16 +244,30 @@ Admin HTTP clients must then send:
 Authorization: Bearer replace-with-an-admin-token
 ```
 
-Set `OOMOL_CONNECT_RUNTIME_TOKEN` separately for `/v1` and `/mcp` callers:
+Create runtime tokens for `/v1` and `/mcp` callers from the Web Console Access tab. The token is
+shown once when created; only a hash is stored in SQLite.
+
+You can also create one through the local admin API:
+
+```bash
+curl -s -X POST http://localhost:3000/api/runtime-tokens \
+  -H 'content-type: application/json' \
+  -d '{"name":"Claude Desktop"}'
+```
+
+Runtime clients then send the returned `token`:
+
+```text
+Authorization: Bearer oct_...
+```
+
+For bootstrap scripts and backward compatibility, `OOMOL_CONNECT_RUNTIME_TOKEN` is still accepted:
 
 ```bash
 OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" \
 OOMOL_CONNECT_RUNTIME_TOKEN="replace-with-a-runtime-token" \
 docker compose up --build
 ```
-
-If you only set the legacy `OOMOL_CONNECT_API_TOKEN`, it is used as both the admin and runtime
-token.
 
 Encrypt stored provider credentials and OAuth client secrets:
 
@@ -349,6 +364,9 @@ Local admin endpoints power the web console, examples, and setup scripts:
 - `DELETE /api/oauth/configs/:service`
 - `POST /api/oauth/authorizations`
 - `GET /oauth/callback/:service`
+- `GET /api/runtime-tokens`
+- `POST /api/runtime-tokens`
+- `DELETE /api/runtime-tokens/:id`
 - `GET /api/runs`
 - `POST /mcp`
 - `GET /mcp/tools`

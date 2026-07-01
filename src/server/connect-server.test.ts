@@ -5,6 +5,7 @@ import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { IRunLogStore, RunLog } from "./runtime-store.ts";
+import type { IRuntimeTokenStore, RuntimeTokenRecord } from "./runtime-token-service.ts";
 
 import { describe, expect, it } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
@@ -14,6 +15,7 @@ import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.t
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import { ActionRunner } from "./action-runner.ts";
 import { ConnectServer } from "./connect-server.ts";
+import { RuntimeTokenService } from "./runtime-token-service.ts";
 
 const apiKeyProvider: ProviderDefinition = {
   service: "example",
@@ -66,7 +68,7 @@ describe("ConnectServer", () => {
     });
   });
 
-  it("requires a local API token when configured", async () => {
+  it("requires local bearer tokens when configured", async () => {
     const app = createTestServer([apiKeyProvider], {
       auth: { adminToken: "local-token", runtimeToken: "runtime-token" },
     }).createApp();
@@ -78,7 +80,7 @@ describe("ConnectServer", () => {
     await expect(unauthorized.json()).resolves.toEqual({
       error: {
         code: "unauthorized",
-        message: "A valid local API token is required.",
+        message: "A valid local bearer token is required.",
       },
     });
 
@@ -99,6 +101,84 @@ describe("ConnectServer", () => {
       headers: { authorization: "Bearer runtime-token" },
     });
     expect(runtimeAuthorized.status).toBe(200);
+  });
+
+  it("does not accept the admin token for stored runtime token access", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([apiKeyProvider], {
+      auth: { adminToken: "local-token" },
+      runtimeTokens,
+    }).createApp();
+
+    const created = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer local-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "Claude Desktop" }),
+    });
+    expect(created.status).toBe(200);
+    const createdBody = (await created.json()) as { token: string; record: RuntimeTokenRecord };
+
+    const adminTokenRuntimeCall = await app.request("/v1/actions", {
+      headers: { authorization: "Bearer local-token" },
+    });
+    expect(adminTokenRuntimeCall.status).toBe(401);
+
+    const runtimeTokenCall = await app.request("/v1/actions", {
+      headers: { authorization: `Bearer ${createdBody.token}` },
+    });
+    expect(runtimeTokenCall.status).toBe(200);
+  });
+
+  it("manages runtime tokens and gates runtime API calls after one is created", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([apiKeyProvider], { runtimeTokens }).createApp();
+
+    const initiallyOpen = await app.request("/v1/actions");
+    expect(initiallyOpen.status).toBe(200);
+
+    const created = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Claude Desktop" }),
+    });
+    expect(created.status).toBe(200);
+    const createdBody = (await created.json()) as { token: string; record: RuntimeTokenRecord };
+    expect(createdBody.token).toMatch(/^oct_/);
+    expect(createdBody.record).toMatchObject({
+      name: "Claude Desktop",
+    });
+    expect(JSON.stringify(createdBody.record)).not.toContain(createdBody.token);
+
+    const listed = await app.request("/api/runtime-tokens");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject([
+      {
+        id: createdBody.record.id,
+        name: "Claude Desktop",
+      },
+    ]);
+
+    const unauthorized = await app.request("/v1/actions");
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await app.request("/v1/actions", {
+      headers: { authorization: `Bearer ${createdBody.token}` },
+    });
+    expect(authorized.status).toBe(200);
+
+    const revoked = await app.request(`/api/runtime-tokens/${createdBody.record.id}`, {
+      method: "DELETE",
+    });
+    expect(revoked.status).toBe(200);
+    await expect(revoked.json()).resolves.toEqual({ id: createdBody.record.id, revoked: true });
+
+    const revokedUnauthorized = await app.request("/v1/actions", {
+      headers: { authorization: `Bearer ${createdBody.token}` },
+    });
+    expect(revokedUnauthorized.status).toBe(401);
   });
 
   it("stores redacted run log summaries for HTTP action execution", async () => {
@@ -508,6 +588,7 @@ interface CreateTestServerOptions {
   auth?: { adminToken?: string; runtimeToken?: string };
   actionPolicy?: ActionPolicyService;
   providerLoader?: IProviderLoader;
+  runtimeTokens?: RuntimeTokenService;
   runs?: MemoryRunLogStore;
 }
 
@@ -516,6 +597,7 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     executableActionIds: ["example.echo"],
   });
   const providerLoader = options.providerLoader ?? new EmptyProviderLoader();
+  const runtimeTokens = options.runtimeTokens ?? new RuntimeTokenService(new MemoryRuntimeTokenStore());
   const runs = options.runs ?? new MemoryRunLogStore();
   const connections = new ConnectionService({
     catalog,
@@ -547,8 +629,13 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
       states: new MemoryOAuthStateStore(),
     }),
     actions: actionRunner,
+    runtimeTokens,
     staticRoot: ".tmp/test-static",
-    auth: options.auth,
+    auth: {
+      ...options.auth,
+      hasRuntimeTokens: async () => (await runtimeTokens.listTokens()).length > 0,
+      verifyRuntimeToken: (token) => runtimeTokens.verifyToken(token),
+    },
     actionPolicy: options.actionPolicy,
   });
 }
@@ -650,6 +737,39 @@ class MemoryOAuthStateStore implements IOAuthStateStore {
 
   async take(_state: string): Promise<OAuthAuthorizationState | undefined> {
     return undefined;
+  }
+}
+
+class MemoryRuntimeTokenStore implements IRuntimeTokenStore {
+  private readonly tokens = new Map<string, RuntimeTokenRecord>();
+
+  async add(record: RuntimeTokenRecord): Promise<void> {
+    this.tokens.set(record.id, record);
+  }
+
+  async list(): Promise<RuntimeTokenRecord[]> {
+    return [...this.tokens.values()].sort((left, right) =>
+      right.createdAt === left.createdAt
+        ? right.id.localeCompare(left.id)
+        : right.createdAt.localeCompare(left.createdAt),
+    );
+  }
+
+  async revoke(id: string, revokedAt: string): Promise<boolean> {
+    const token = this.tokens.get(id);
+    if (!token || token.revokedAt) {
+      return false;
+    }
+
+    this.tokens.set(id, { ...token, revokedAt });
+    return true;
+  }
+
+  async markUsed(id: string, usedAt: string): Promise<void> {
+    const token = this.tokens.get(id);
+    if (token && !token.revokedAt) {
+      this.tokens.set(id, { ...token, lastUsedAt: usedAt });
+    }
   }
 }
 

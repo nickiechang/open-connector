@@ -185,19 +185,19 @@ button {
 
 .main {
   min-width: 0;
-  width: min(1220px, calc(100% - 48px));
+  width: min(1180px, calc(100% - clamp(32px, 6vw, 96px)));
   margin: 0 auto;
-  padding: 32px 0 56px;
+  padding: 28px 0 56px;
 }
 
 .page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  padding-bottom: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+  align-items: end;
+  gap: 32px;
+  padding-bottom: 22px;
   border-bottom: 1px solid var(--border);
-  margin: 0 0 18px;
+  margin: 0 0 16px;
 }
 
 h1,
@@ -232,7 +232,8 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: min(480px, 45vw);
+  justify-self: end;
+  width: min(480px, 100%);
 }
 
 .search-box {
@@ -291,11 +292,8 @@ h3 {
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
-  gap: 0;
-  margin-bottom: 18px;
-  border-radius: 8px;
-  background: var(--card);
-  box-shadow: var(--ring-soft);
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 .metric,
@@ -313,11 +311,6 @@ h3 {
 
 .metric {
   padding: 14px 18px;
-  border-right: 1px solid var(--border);
-}
-
-.metric:last-child {
-  border-right: 0;
 }
 
 .metric span,
@@ -336,9 +329,36 @@ h3 {
 
 .split-view {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
+}
+
+.access-layout {
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+}
+
+.access-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.access-panel-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  gap: 24px;
+  align-items: start;
+}
+
+.access-panel .detail-heading {
+  margin-bottom: 0;
+}
+
+.token-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
 }
 
 .list-panel {
@@ -756,6 +776,10 @@ pre,
   background: rgb(248, 248, 248);
 }
 
+.token-result pre {
+  max-height: none;
+}
+
 .json-input {
   min-height: 180px;
   padding: 12px;
@@ -869,6 +893,11 @@ td {
   vertical-align: middle;
 }
 
+.table-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
 th {
   color: var(--muted);
   font-size: 12px;
@@ -967,6 +996,7 @@ tr:last-child td {
 
   .page-header,
   .split-view,
+  .access-layout,
   .example-grid,
   .docs-grid {
     display: grid;
@@ -976,6 +1006,21 @@ tr:last-child td {
   .metrics,
   .section-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-header {
+    align-items: start;
+    gap: 16px;
+  }
+
+  .topbar-actions {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .access-panel-header,
+  .token-create-form {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -991,16 +1036,13 @@ tr:last-child td {
 
   .metrics,
   .section-grid {
+    display: grid;
     grid-template-columns: 1fr;
+    width: 100%;
   }
 
   .metric {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .metric:last-child {
-    border-bottom: 0;
+    border: 0;
   }
 
   .nav-list {

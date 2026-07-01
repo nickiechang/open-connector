@@ -4,6 +4,7 @@ import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
 import type { RuntimeConnectionSnapshot, RuntimeDataSnapshot } from "./runtime-data-backup.ts";
 import type { IRunLogStore, RunLog } from "./runtime-store.ts";
+import type { IRuntimeTokenStore, RuntimeTokenRecord } from "./runtime-token-service.ts";
 import type { ISecretCodec } from "./secret-codec.ts";
 
 import { DatabaseSync } from "node:sqlite";
@@ -47,6 +48,7 @@ export class SqliteRuntimeDatabase {
   readonly connectionStore: SqliteConnectionStore;
   readonly oauthClientConfigStore: SqliteOAuthClientConfigStore;
   readonly oauthStateStore: SqliteOAuthStateStore;
+  readonly runtimeTokenStore: SqliteRuntimeTokenStore;
   readonly runLogStore: SqliteRunLogStore;
 
   private readonly database: DatabaseSync;
@@ -59,6 +61,7 @@ export class SqliteRuntimeDatabase {
     this.connectionStore = new SqliteConnectionStore(this.database, this.secretCodec);
     this.oauthClientConfigStore = new SqliteOAuthClientConfigStore(this.database, this.secretCodec);
     this.oauthStateStore = new SqliteOAuthStateStore(this.database);
+    this.runtimeTokenStore = new SqliteRuntimeTokenStore(this.database);
     this.runLogStore = new SqliteRunLogStore(this.database, options.runLimit ?? 100);
   }
 
@@ -106,6 +109,7 @@ export class SqliteRuntimeDatabase {
       delete from connections;
       delete from oauth_client_configs;
       delete from oauth_states;
+      delete from runtime_tokens;
       delete from runs;
     `);
   }
@@ -129,6 +133,14 @@ export class SqliteRuntimeDatabase {
         state text primary key,
         value text not null,
         created_at text not null
+      );
+      create table if not exists runtime_tokens (
+        id text primary key,
+        name text not null,
+        token_hash text not null unique,
+        created_at text not null,
+        last_used_at text,
+        revoked_at text
       );
       create table if not exists runs (
         id text primary key,
@@ -251,6 +263,65 @@ export class SqliteOAuthStateStore implements IOAuthStateStore {
     const pending = getJson<OAuthAuthorizationState>(this.database, "oauth_states", "state", state);
     this.database.prepare("delete from oauth_states where state = ?").run(state);
     return pending;
+  }
+}
+
+export class SqliteRuntimeTokenStore implements IRuntimeTokenStore {
+  private readonly database: DatabaseSync;
+
+  constructor(database: DatabaseSync) {
+    this.database = database;
+  }
+
+  async add(record: RuntimeTokenRecord): Promise<void> {
+    this.database
+      .prepare(
+        `
+        insert into runtime_tokens (id, name, token_hash, created_at, last_used_at, revoked_at)
+        values (?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        record.id,
+        record.name,
+        record.tokenHash,
+        record.createdAt,
+        record.lastUsedAt ?? null,
+        record.revokedAt ?? null,
+      );
+  }
+
+  async list(): Promise<RuntimeTokenRecord[]> {
+    return this.database
+      .prepare(
+        `
+        select id, name, token_hash, created_at, last_used_at, revoked_at
+        from runtime_tokens
+        order by created_at desc, id desc
+      `,
+      )
+      .all()
+      .map((row) => ({
+        id: readString(row, "id"),
+        name: readString(row, "name"),
+        tokenHash: readString(row, "token_hash"),
+        createdAt: readString(row, "created_at"),
+        lastUsedAt: readOptionalString(row, "last_used_at"),
+        revokedAt: readOptionalString(row, "revoked_at"),
+      }));
+  }
+
+  async revoke(id: string, revokedAt: string): Promise<boolean> {
+    const result = this.database
+      .prepare("update runtime_tokens set revoked_at = ? where id = ? and revoked_at is null")
+      .run(revokedAt, id);
+    return result.changes > 0;
+  }
+
+  async markUsed(id: string, usedAt: string): Promise<void> {
+    this.database
+      .prepare("update runtime_tokens set last_used_at = ? where id = ? and revoked_at is null")
+      .run(usedAt, id);
   }
 }
 
@@ -380,6 +451,22 @@ function readString(row: unknown, key: string): string {
   }
 
   const value = (row as Record<string, unknown>)[key];
+  if (typeof value !== "string") {
+    throw new Error(`Expected SQLite column ${key} to be a string.`);
+  }
+
+  return value;
+}
+
+function readOptionalString(row: unknown, key: string): string | undefined {
+  if (typeof row !== "object" || row == null) {
+    throw new Error(`Expected SQLite row for ${key}.`);
+  }
+
+  const value = (row as Record<string, unknown>)[key];
+  if (value == null) {
+    return undefined;
+  }
   if (typeof value !== "string") {
     throw new Error(`Expected SQLite column ${key} to be a string.`);
   }

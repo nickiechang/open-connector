@@ -8,8 +8,7 @@ Start the local runtime:
 npm run dev
 ```
 
-If the runtime was started with `OOMOL_CONNECT_API_TOKEN`, set the same variable when running
-examples.
+If the runtime requires a bearer token, set `OOMOL_CONNECT_RUNTIME_TOKEN` when running examples.
 
 Print the tool definitions sent to the OpenAI Responses API:
 

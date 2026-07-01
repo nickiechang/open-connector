@@ -3,6 +3,7 @@ import type { ConnectionService } from "../connection-service.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { LocalAuthOptions } from "./auth.ts";
+import type { RuntimeTokenService } from "./runtime-token-service.ts";
 import type { Context } from "hono";
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -39,6 +40,7 @@ export interface IConnectServerOptions {
   connections: ConnectionService;
   oauthClientConfigs: OAuthClientConfigService;
   oauthFlow: OAuthFlowService;
+  runtimeTokens: RuntimeTokenService;
   actions: ActionRunner;
   staticRoot: string;
   auth?: LocalAuthOptions;
@@ -120,6 +122,9 @@ export class ConnectServer {
     app.delete("/api/connections/:service", (context) => this.disconnect(context, context.req.param("service")));
 
     app.get("/api/runs", (context) => context.json(this.options.actions.listRuns()));
+    app.get("/api/runtime-tokens", (context) => this.listRuntimeTokens(context));
+    app.post("/api/runtime-tokens", (context) => this.createRuntimeToken(context));
+    app.delete("/api/runtime-tokens/:id", (context) => this.revokeRuntimeToken(context, context.req.param("id")));
     app.get("/api/oauth/configs", (context) => this.listOAuthConfigs(context));
     app.put("/api/oauth/configs/:service", (context) => this.upsertOAuthConfig(context, context.req.param("service")));
     app.delete("/api/oauth/configs/:service", (context) =>
@@ -398,6 +403,36 @@ export class ConnectServer {
 
       throw error;
     }
+  }
+
+  private async listRuntimeTokens(context: Context): Promise<Response> {
+    return context.json(await this.options.runtimeTokens.listTokens());
+  }
+
+  private async createRuntimeToken(context: Context): Promise<Response> {
+    const body = await readJsonBody(context);
+    const name = optionalString(body.name);
+    if (!name) {
+      return jsonError(context, 400, "invalid_input", "name is required.");
+    }
+
+    const created = await this.options.runtimeTokens.createToken(name);
+    return context.json({
+      token: created.token,
+      record: {
+        id: created.record.id,
+        name: created.record.name,
+        createdAt: created.record.createdAt,
+      },
+    });
+  }
+
+  private async revokeRuntimeToken(context: Context, id: string): Promise<Response> {
+    if (!(await this.options.runtimeTokens.revokeToken(id))) {
+      return jsonError(context, 404, "runtime_token_not_found", `Runtime token not found: ${id}.`);
+    }
+
+    return context.json({ id, revoked: true });
   }
 
   private async listOAuthConfigs(context: Context): Promise<Response> {

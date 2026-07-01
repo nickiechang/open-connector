@@ -139,18 +139,17 @@ Set `OOMOL_CONNECT_ENCRYPTION_KEY` to encrypt stored credentials:
 OOMOL_CONNECT_ENCRYPTION_KEY="replace-with-a-long-random-secret" npm run dev
 ```
 
-Set separate admin and runtime bearer tokens:
+Set an admin bearer token when the admin API or web console is reachable outside your own shell:
 
 ```bash
-OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" \
-OOMOL_CONNECT_RUNTIME_TOKEN="replace-with-a-runtime-token" \
-npm run dev
+OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" npm run dev
 curl -s http://localhost:3000/api/actions \
   -H "authorization: Bearer replace-with-an-admin-token"
 ```
 
-Use the admin token for `/api`, `/docs`, and the web console. Use the runtime token for `/v1` and
-`/mcp`. The legacy `OOMOL_CONNECT_API_TOKEN` still works as a fallback for both.
+Use the admin token for `/api`, `/docs`, and the web console. Create persistent runtime tokens for
+`/v1` and `/mcp` from the web console Access tab or `POST /api/runtime-tokens`; only token hashes are
+stored in SQLite. `OOMOL_CONNECT_RUNTIME_TOKEN` remains available for bootstrap scripts.
 
 The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` only when the runtime must be
 reachable from outside the local machine or container.

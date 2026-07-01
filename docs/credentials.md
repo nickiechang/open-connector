@@ -255,12 +255,10 @@ provider definitions should include those parameters when refresh tokens are exp
 The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` only when the runtime must be
 reachable from outside the local machine or container.
 
-Set separate bearer tokens for local administration and runtime callers:
+Set an admin bearer token when the admin API or web console is reachable outside your own shell:
 
 ```bash
-OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" \
-OOMOL_CONNECT_RUNTIME_TOKEN="replace-with-a-runtime-token" \
-npm run dev
+OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" npm run dev
 ```
 
 Admin clients calling `/api`, `/docs`, or the web console should send:
@@ -269,9 +267,11 @@ Admin clients calling `/api`, `/docs`, or the web console should send:
 Authorization: Bearer replace-with-an-admin-token
 ```
 
-Runtime clients calling `/v1` or `/mcp` should send `Authorization: Bearer
-replace-with-a-runtime-token`. The legacy `OOMOL_CONNECT_API_TOKEN` is still accepted as a fallback
-for both scopes when the split tokens are unset.
+Create runtime tokens for `/v1` and `/mcp` callers from the web console Access tab or
+`POST /api/runtime-tokens`. The token is shown once when created; only a hash is stored in SQLite.
+Runtime clients should send `Authorization: Bearer oct_...`.
+
+`OOMOL_CONNECT_RUNTIME_TOKEN` is still accepted for bootstrap scripts and backward compatibility.
 
 The bundled web console receives a same-site local cookie from the runtime so it can keep working
 when API-token authentication is enabled.

@@ -90,6 +90,19 @@ interface OAuthConfig {
   extra: Record<string, string>;
 }
 
+interface RuntimeTokenSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+}
+
+interface RuntimeTokenCreation {
+  token: string;
+  record: RuntimeTokenSummary;
+}
+
 interface RunLog {
   id: string;
   actionId: string;
@@ -117,6 +130,7 @@ interface AppData {
   providers: ProviderDefinition[];
   connections: ConnectionRecord[];
   oauthConfigs: OAuthConfig[];
+  runtimeTokens: RuntimeTokenSummary[];
   runs: RunLog[];
 }
 
@@ -165,6 +179,11 @@ interface DocCardProps {
   href: string;
 }
 
+interface RuntimeTokensViewProps {
+  tokens: RuntimeTokenSummary[];
+  onRefresh(): void;
+}
+
 interface ExampleTabsProps {
   action: ActionDefinition;
   examples: { curl: string; typescript: string };
@@ -174,12 +193,14 @@ const emptyData: AppData = {
   providers: [],
   connections: [],
   oauthConfigs: [],
+  runtimeTokens: [],
   runs: [],
 };
 
 const tabs = [
   { id: "providers", label: "Providers", icon: AppWindow },
   { id: "actions", label: "Actions", icon: TerminalSquare },
+  { id: "access", label: "Access", icon: KeyRound },
   { id: "runs", label: "Runs", icon: Activity },
   { id: "docs", label: "Docs", icon: BookOpen },
 ] as const;
@@ -203,13 +224,15 @@ export function App(): ReactNode {
       apiGet<ProviderDefinition[]>("/api/providers"),
       apiGet<ConnectionRecord[]>("/api/connections"),
       apiGet<OAuthConfig[]>("/api/oauth/configs"),
+      apiGet<RuntimeTokenSummary[]>("/api/runtime-tokens"),
       apiGet<RunLog[]>("/api/runs"),
     ])
-      .then(([providers, connections, oauthConfigs, runs]) => {
+      .then(([providers, connections, oauthConfigs, runtimeTokens, runs]) => {
         if (!cancelled) {
-          setData({ providers, connections, oauthConfigs, runs });
-          setSelectedService((current) => current ?? providers[0]?.service ?? null);
-          setSelectedActionId((current) => current ?? providers[0]?.actions[0]?.id ?? null);
+          setData({ providers, connections, oauthConfigs, runtimeTokens, runs });
+          const firstProvider = firstProviderByConnectionStatus(providers, connections);
+          setSelectedService((current) => current ?? firstProvider?.service ?? null);
+          setSelectedActionId((current) => current ?? firstProvider?.actions[0]?.id ?? null);
           setError(null);
         }
       })
@@ -234,10 +257,15 @@ export function App(): ReactNode {
     [data.oauthConfigs],
   );
   const actions = useMemo(() => data.providers.flatMap((provider) => provider.actions), [data.providers]);
-  const selectedProvider = data.providers.find((provider) => provider.service === selectedService) ?? data.providers[0];
+  const sortedProviders = useMemo(
+    () => sortProviders(data.providers, connectionsByService),
+    [data.providers, connectionsByService],
+  );
+  const selectedProvider =
+    sortedProviders.find((provider) => provider.service === selectedService) ?? sortedProviders[0];
   const selectedAction =
     actions.find((action) => action.id === selectedActionId) ?? selectedProvider?.actions[0] ?? actions[0];
-  const filteredProviders = filterProviders(data.providers, query);
+  const filteredProviders = filterProviders(sortedProviders, query);
   const filteredActions = filterActions(actions, query, selectedService);
 
   function refresh(): void {
@@ -284,16 +312,18 @@ export function App(): ReactNode {
             <h1>{headingFor(activeTab)}</h1>
             <p>{subtitleFor(activeTab)}</p>
           </div>
-          <div className="topbar-actions">
-            <label className="search-box">
-              <Search size={16} />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search providers or actions"
-              />
-            </label>
-          </div>
+          {activeTab === "providers" || activeTab === "actions" ? (
+            <div className="topbar-actions">
+              <label className="search-box">
+                <Search size={16} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search providers or actions"
+                />
+              </label>
+            </div>
+          ) : null}
         </section>
 
         {error ? <InlineError message={error} /> : null}
@@ -302,7 +332,7 @@ export function App(): ReactNode {
           <Metric label="Providers" value={data.providers.length} />
           <Metric label="Actions" value={actions.length} />
           <Metric label="Connected" value={data.connections.length} />
-          <Metric label="Runs" value={data.runs.length} />
+          <Metric label="Tokens" value={data.runtimeTokens.filter((token) => !token.revokedAt).length} />
         </section>
 
         {activeTab === "providers" ? (
@@ -335,6 +365,8 @@ export function App(): ReactNode {
 
         {activeTab === "runs" ? <RunsView runs={data.runs} /> : null}
 
+        {activeTab === "access" ? <RuntimeTokensView tokens={data.runtimeTokens} onRefresh={refresh} /> : null}
+
         {activeTab === "docs" ? <DocsView actions={actions} /> : null}
       </main>
     </div>
@@ -342,13 +374,13 @@ export function App(): ReactNode {
 }
 
 function ProvidersView(props: ProvidersViewProps): ReactNode {
-  const selectedProvider =
-    props.providers.find((provider) => provider.service === props.selectedService) ?? props.providers[0];
+  const providers = sortProviders(props.providers, props.connectionsByService);
+  const selectedProvider = providers.find((provider) => provider.service === props.selectedService) ?? providers[0];
 
   return (
     <div className="split-view">
       <section className="list-panel">
-        {props.providers.map((provider) => {
+        {providers.map((provider) => {
           const connected = props.connectionsByService.has(provider.service);
           return (
             <button
@@ -687,6 +719,126 @@ function RunsView(props: { runs: RunLog[] }): ReactNode {
   );
 }
 
+function RuntimeTokensView(props: RuntimeTokensViewProps): ReactNode {
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<RuntimeTokenCreation | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const { copy, copied } = useClipboard();
+
+  async function submit(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setStatus("Creating token...");
+    setCreated(null);
+    try {
+      const result = await apiPost<RuntimeTokenCreation>("/api/runtime-tokens", { name });
+      setCreated(result);
+      setName("");
+      setStatus("Token created.");
+      props.onRefresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to create token.");
+    }
+  }
+
+  async function revoke(id: string): Promise<void> {
+    setStatus("Revoking token...");
+    try {
+      await apiDelete(`/api/runtime-tokens/${id}`);
+      setStatus("Token revoked.");
+      props.onRefresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to revoke token.");
+    }
+  }
+
+  return (
+    <section className="detail-panel access-panel">
+      <div className="access-panel-header">
+        <div className="detail-heading">
+          <div className="action-mark">
+            <KeyRound size={20} />
+          </div>
+          <div>
+            <h2>Runtime Tokens</h2>
+            <p>Issue bearer tokens for /v1 and MCP clients. New tokens are shown once.</p>
+          </div>
+        </div>
+
+        <form className="token-create-form" onSubmit={(event) => void submit(event)}>
+          <label className="field">
+            <span>Name</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Local MCP client" />
+          </label>
+          <button className="primary-button" type="submit" disabled={!name.trim()}>
+            <KeyRound size={16} />
+            Create Token
+          </button>
+        </form>
+      </div>
+
+      {status ? <p className="form-status">{status}</p> : null}
+
+      {created ? (
+        <section className="example-card token-result">
+          <div className="tab-row">
+            <strong>New token</strong>
+            <button
+              className="icon-button subtle"
+              onClick={() => void copy(created.token)}
+              aria-label={copied ? "Copied runtime token" : "Copy runtime token"}
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+            </button>
+          </div>
+          <pre>{created.token}</pre>
+        </section>
+      ) : null}
+
+      <section className="table-panel">
+        {props.tokens.length === 0 ? (
+          <EmptyState
+            icon={<KeyRound size={20} />}
+            title="No runtime tokens yet"
+            description="Create one before connecting an MCP client or local script. The token is shown once."
+          />
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.tokens.map((token) => (
+                <tr key={token.id}>
+                  <td>
+                    <strong>{token.name}</strong>
+                  </td>
+                  <td>{token.revokedAt ? <Badge>Revoked</Badge> : <Badge tone="success">Active</Badge>}</td>
+                  <td>{formatDate(token.createdAt)}</td>
+                  <td>{token.lastUsedAt ? formatDate(token.lastUsedAt) : ""}</td>
+                  <td className="table-actions">
+                    {!token.revokedAt ? (
+                      <button className="secondary-button compact" onClick={() => void revoke(token.id)}>
+                        <Trash2 size={15} />
+                        Revoke
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </section>
+  );
+}
+
 function DocsView(props: { actions: ActionDefinition[] }): ReactNode {
   return (
     <div className="docs-grid">
@@ -950,10 +1102,10 @@ function ProviderIcon(props: { provider: ProviderDefinition; large?: boolean }):
   return <span className={props.large ? "provider-icon large" : "provider-icon"}>{letters}</span>;
 }
 
-function EmptyState(props: { title: string; description: string }): ReactNode {
+function EmptyState(props: { title: string; description: string; icon?: ReactNode }): ReactNode {
   return (
     <div className="empty-state">
-      <X size={20} />
+      {props.icon ?? <X size={20} />}
       <strong>{props.title}</strong>
       <p>{props.description}</p>
     </div>
@@ -975,6 +1127,7 @@ function StatusDot(props: { ok: boolean }): ReactNode {
 
 function headingFor(tab: TabId): string {
   if (tab === "actions") return "Actions";
+  if (tab === "access") return "Access";
   if (tab === "runs") return "Runs";
   if (tab === "docs") return "Docs";
   return "Providers";
@@ -982,6 +1135,7 @@ function headingFor(tab: TabId): string {
 
 function subtitleFor(tab: TabId): string {
   if (tab === "actions") return "Generate examples and run local provider actions.";
+  if (tab === "access") return "Manage runtime API tokens for agents and clients.";
   if (tab === "runs") return "Recent local action executions.";
   if (tab === "docs") return "Generated API and tool metadata.";
   return "Connect providers and review capabilities.";
@@ -1015,6 +1169,28 @@ function filterProviders(providers: ProviderDefinition[], query: string): Provid
       .toLowerCase()
       .includes(normalized),
   );
+}
+
+function sortProviders(
+  providers: ProviderDefinition[],
+  connectionsByService: Map<string, ConnectionRecord>,
+): ProviderDefinition[] {
+  return [...providers].sort((left, right) => {
+    const leftConnected = connectionsByService.has(left.service);
+    const rightConnected = connectionsByService.has(right.service);
+    if (leftConnected !== rightConnected) {
+      return leftConnected ? -1 : 1;
+    }
+
+    return left.displayName.localeCompare(right.displayName);
+  });
+}
+
+function firstProviderByConnectionStatus(
+  providers: ProviderDefinition[],
+  connections: ConnectionRecord[],
+): ProviderDefinition | undefined {
+  return sortProviders(providers, new Map(connections.map((connection) => [connection.service, connection])))[0];
 }
 
 function filterActions(actions: ActionDefinition[], query: string, service: string | null): ActionDefinition[] {

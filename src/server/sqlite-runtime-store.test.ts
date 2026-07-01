@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { RuntimeTokenService } from "./runtime-token-service.ts";
 import { AesGcmSecretCodec } from "./secret-codec.ts";
 import { SqliteRuntimeDatabase } from "./sqlite-runtime-store.ts";
 
@@ -117,6 +118,32 @@ describe("SqliteRuntimeDatabase", () => {
       apiKey: "github-token",
     });
     second.close();
+  });
+
+  it("stores runtime token hashes and supports verification and revocation", async () => {
+    const databasePath = await createDatabasePath();
+    const database = new SqliteRuntimeDatabase(databasePath);
+    const tokens = new RuntimeTokenService(database.runtimeTokenStore);
+
+    const created = await tokens.createToken("Claude Desktop");
+    expect(created.token).toMatch(/^oct_/);
+    expect(created.record.name).toBe("Claude Desktop");
+    expect(created.record.tokenHash).not.toBe(created.token);
+    await expectDatabaseDirectoryNotToContain(databasePath, created.token);
+
+    await expect(tokens.verifyToken(created.token)).resolves.toBe(true);
+    const [listed] = await tokens.listTokens();
+    expect(listed).toMatchObject({
+      id: created.record.id,
+      name: "Claude Desktop",
+    });
+    expect(listed?.lastUsedAt).toBeTruthy();
+    expect(JSON.stringify(listed)).not.toContain(created.token);
+
+    await expect(tokens.revokeToken(created.record.id)).resolves.toBe(true);
+    await expect(tokens.verifyToken(created.token)).resolves.toBe(false);
+    await expect(tokens.revokeToken(created.record.id)).resolves.toBe(false);
+    database.close();
   });
 
   it("exports, restores, and resets runtime data snapshots", async () => {

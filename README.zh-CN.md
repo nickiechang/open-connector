@@ -217,6 +217,7 @@ Web 控制台也可以为每个 action 复制 cURL、TypeScript 和 agent prompt
 
 - 浏览 provider 和连接状态。
 - 保存 API key 或 OAuth client 配置。
+- 创建和撤销给 agent / client 使用的 runtime API token。
 - 查看 action schema、scope 和执行状态。
 - 从浏览器运行 action 进行调试。
 - 查看最近的本地运行记录。
@@ -237,15 +238,30 @@ OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" docker compose up --buil
 Authorization: Bearer replace-with-an-admin-token
 ```
 
-为 `/v1` 和 `/mcp` 调用方单独设置 runtime token：
+在 Web 控制台的 Access 页面为 `/v1` 和 `/mcp` 调用方创建 runtime token。token 只会在创建时显示一次；
+SQLite 里只保存 hash。
+
+也可以通过本地管理 API 创建：
+
+```bash
+curl -s -X POST http://localhost:3000/api/runtime-tokens \
+  -H 'content-type: application/json' \
+  -d '{"name":"Claude Desktop"}'
+```
+
+之后，runtime client 使用返回的 `token`：
+
+```text
+Authorization: Bearer oct_...
+```
+
+为了启动脚本和向后兼容，仍然可以使用 `OOMOL_CONNECT_RUNTIME_TOKEN`：
 
 ```bash
 OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" \
 OOMOL_CONNECT_RUNTIME_TOKEN="replace-with-a-runtime-token" \
 docker compose up --build
 ```
-
-如果只设置旧的 `OOMOL_CONNECT_API_TOKEN`，它会同时作为 admin token 和 runtime token 使用。
 
 加密存储的 provider 凭据和 OAuth client secret：
 
@@ -338,6 +354,9 @@ OPENAI_API_KEY=sk-... OPENAI_MODEL=gpt-... node examples/openai-tools/run-hacker
 - `DELETE /api/oauth/configs/:service`
 - `POST /api/oauth/authorizations`
 - `GET /oauth/callback/:service`
+- `GET /api/runtime-tokens`
+- `POST /api/runtime-tokens`
+- `DELETE /api/runtime-tokens/:id`
 - `GET /api/runs`
 - `POST /mcp`
 - `GET /mcp/tools`

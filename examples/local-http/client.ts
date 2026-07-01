@@ -1,5 +1,5 @@
 export function localHeaders(headers: HeadersInit = {}): HeadersInit {
-  const token = process.env.OOMOL_CONNECT_API_TOKEN;
+  const token = process.env.OOMOL_CONNECT_RUNTIME_TOKEN;
   if (!token) {
     return headers;
   }

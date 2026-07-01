@@ -11,6 +11,10 @@ export type OpenApiDocument = {
     title: string;
     version: string;
   };
+  tags: Array<{
+    name: string;
+    description: string;
+  }>;
   paths: Record<string, unknown>;
   components: {
     schemas: Record<string, JsonSchema>;
@@ -98,40 +102,42 @@ export function createOpenApiDocument(
   }
 
   const paths: Record<string, unknown> = {
-    "/health": getOperation("Runtime health check.", { ok: jsonSchema.boolean() }),
-    "/api/providers": getOperation("List provider catalog entries.", {
+    "/health": getOperation("System", "Runtime health check.", { ok: jsonSchema.boolean() }),
+    "/api/providers": getOperation("Catalog", "List provider catalog entries.", {
       type: "array",
       items: { $ref: "#/components/schemas/ProviderDefinition" },
     }),
-    "/api/providers/{service}": getOperation("Get one provider catalog entry.", {
+    "/api/providers/{service}": getOperation("Catalog", "Get one provider catalog entry.", {
       $ref: "#/components/schemas/ProviderDefinition",
     }),
-    "/api/actions": getOperation("List all catalog actions.", {
+    "/api/actions": getOperation("Catalog", "List all catalog actions.", {
       type: "array",
       items: { $ref: "#/components/schemas/ActionDefinition" },
     }),
-    "/api/actions/{actionId}": getOperation("Get one catalog action.", {
+    "/api/actions/{actionId}": getOperation("Catalog", "Get one catalog action.", {
       $ref: "#/components/schemas/ActionDefinition",
     }),
-    "/api/actions/{actionId}/agent.md": getOperation("Get one markdown action guide.", {
+    "/api/actions/{actionId}/agent.md": getOperation("Catalog", "Get one markdown action guide.", {
       type: "string",
       description: "Markdown guide for one action.",
     }),
-    "/api/connections": getOperation("List local provider connections.", {
+    "/api/connections": getOperation("Connections", "List local provider connections.", {
       type: "array",
       items: { $ref: "#/components/schemas/ConnectionSummary" },
     }),
     "/api/connections/{service}": createConnectionPath(),
-    "/api/oauth/configs": getOperation("List local OAuth client configurations.", {
+    "/api/oauth/configs": getOperation("OAuth", "List local OAuth client configurations.", {
       type: "array",
       items: { $ref: "#/components/schemas/OAuthClientConfigSummary" },
     }),
     "/api/oauth/configs/{service}": createOAuthConfigPath(),
     "/api/oauth/authorizations": createOAuthAuthorizationPath(),
+    "/api/runtime-tokens": createRuntimeTokensPath(),
+    "/api/runtime-tokens/{id}": createRuntimeTokenPath(),
     "/api/actions/{actionId}/runs": runPath,
     "/api/runs": createRunsPath(),
     "/mcp": createMcpPath(),
-    "/mcp/tools": getOperation("List discovery-oriented MCP tool summaries.", {
+    "/mcp/tools": getOperation("MCP", "List discovery-oriented MCP tool summaries.", {
       type: "object",
       properties: {
         tools: { type: "array", items: { type: "object", additionalProperties: true } },
@@ -146,6 +152,15 @@ export function createOpenApiDocument(
       title: "OOMOL Connect Local Runtime",
       version: "0.1.0",
     },
+    tags: [
+      { name: "System", description: "Runtime health and server-level status." },
+      { name: "Catalog", description: "Provider and action metadata used by users and agents." },
+      { name: "Connections", description: "Local provider credentials and connection state." },
+      { name: "OAuth", description: "Local OAuth client configuration and authorization flow." },
+      { name: "Access", description: "Runtime bearer tokens for /v1 and MCP clients." },
+      { name: "Runs", description: "Local action execution and recent run history." },
+      { name: "MCP", description: "MCP Streamable HTTP endpoint and tool metadata." },
+    ],
     paths,
     components: {
       schemas: {
@@ -204,6 +219,28 @@ export function createOpenApiDocument(
           },
         ),
         OAuthClientConfigRequest: oauthClientConfigRequestSchema,
+        RuntimeTokenSummary: jsonSchema.object(
+          {
+            id: jsonSchema.string({ description: "Runtime token identifier." }),
+            name: jsonSchema.string({ description: "User-facing token label." }),
+            createdAt: jsonSchema.string({ description: "Creation timestamp." }),
+            lastUsedAt: jsonSchema.string({ description: "Last successful use timestamp." }),
+            revokedAt: jsonSchema.string({ description: "Revocation timestamp." }),
+          },
+          {
+            required: ["id", "name", "createdAt"],
+            description: "Runtime API token summary. Plaintext tokens and token hashes are not returned.",
+          },
+        ),
+        RuntimeTokenCreateRequest: jsonSchema.object(
+          {
+            name: jsonSchema.string({ description: "User-facing token label." }),
+          },
+          {
+            required: ["name"],
+            description: "Runtime token creation request.",
+          },
+        ),
         ProviderDefinition: jsonSchema.unknownObject("Public provider catalog definition."),
         RunLog: jsonSchema.object(
           {
@@ -235,9 +272,77 @@ export function createOpenApiDocument(
   };
 }
 
+function createRuntimeTokensPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "List runtime API token summaries.",
+      responses: {
+        200: jsonResponse({
+          type: "array",
+          items: { $ref: "#/components/schemas/RuntimeTokenSummary" },
+        }),
+      },
+    },
+    post: {
+      tags: ["Access"],
+      summary: "Create a runtime API token.",
+      description: "The plaintext token is returned once. Only a hash is stored locally.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/RuntimeTokenCreateRequest" },
+          },
+        },
+      },
+      responses: {
+        200: jsonResponse(
+          jsonSchema.object(
+            {
+              token: jsonSchema.string({ description: "Plaintext runtime bearer token. Store it now." }),
+              record: { $ref: "#/components/schemas/RuntimeTokenSummary" },
+            },
+            {
+              required: ["token", "record"],
+              description: "Runtime token creation response.",
+            },
+          ),
+        ),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createRuntimeTokenPath(): Record<string, unknown> {
+  return {
+    delete: {
+      tags: ["Access"],
+      summary: "Revoke a runtime API token.",
+      responses: {
+        200: jsonResponse(
+          jsonSchema.object(
+            {
+              id: jsonSchema.string(),
+              revoked: jsonSchema.boolean(),
+            },
+            {
+              required: ["id", "revoked"],
+              description: "Runtime token revocation response.",
+            },
+          ),
+        ),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
 function createMcpPath(): unknown {
   return {
     post: {
+      tags: ["MCP"],
       summary: "Handle MCP Streamable HTTP requests.",
       responses: {
         "200": {
@@ -256,6 +361,7 @@ function createMcpPath(): unknown {
 function createRunsPath(): Record<string, unknown> {
   return {
     get: {
+      tags: ["Runs"],
       summary: "List recent local action runs.",
       responses: {
         200: jsonResponse({
@@ -270,6 +376,7 @@ function createRunsPath(): Record<string, unknown> {
 function createRunPath(): Record<string, unknown> {
   return {
     post: {
+      tags: ["Runs"],
       summary: "Create a local action run.",
       description:
         "Use the action catalog to discover provider-specific input and output schemas. For a compact strongly typed OpenAPI document for one action, request /openapi.json?actionId=<actionId>.",
@@ -309,6 +416,7 @@ function createRunPath(): Record<string, unknown> {
 function createConnectionPath(): Record<string, unknown> {
   return {
     put: {
+      tags: ["Connections"],
       summary: "Create or replace a local provider connection.",
       description:
         "The accepted auth type and credential field keys are declared by the provider catalog auth metadata. Unknown fields are rejected.",
@@ -327,6 +435,7 @@ function createConnectionPath(): Record<string, unknown> {
       },
     },
     delete: {
+      tags: ["Connections"],
       summary: "Disconnect a provider.",
       responses: {
         200: jsonResponse({
@@ -353,6 +462,7 @@ function createConnectionPath(): Record<string, unknown> {
 function createOAuthAuthorizationPath(): Record<string, unknown> {
   return {
     post: {
+      tags: ["OAuth"],
       summary: "Start provider OAuth authorization.",
       requestBody: {
         required: true,
@@ -397,6 +507,7 @@ function createOAuthAuthorizationPath(): Record<string, unknown> {
 function createOAuthConfigPath(): Record<string, unknown> {
   return {
     put: {
+      tags: ["OAuth"],
       summary: "Upsert local OAuth client configuration.",
       description:
         "Open-source users provide their own OAuth app. Additional extra fields are declared by provider catalog auth metadata.",
@@ -415,6 +526,7 @@ function createOAuthConfigPath(): Record<string, unknown> {
       },
     },
     delete: {
+      tags: ["OAuth"],
       summary: "Delete local OAuth client configuration.",
       responses: {
         200: jsonResponse(
@@ -435,9 +547,10 @@ function createOAuthConfigPath(): Record<string, unknown> {
   };
 }
 
-function getOperation(summary: string, schema: JsonSchema): Record<string, unknown> {
+function getOperation(tag: string, summary: string, schema: JsonSchema): Record<string, unknown> {
   return {
     get: {
+      tags: [tag],
       summary,
       responses: {
         200: jsonResponse(schema),
@@ -471,6 +584,7 @@ function createConnectionUpsertRequestSchema(): JsonSchema {
 
 function createConcreteRunOperation(action: ActionDefinition): Record<string, unknown> {
   return {
+    tags: ["Runs"],
     summary: `Create a local run for ${action.id}.`,
     description: action.description,
     requestBody: {

@@ -10,6 +10,7 @@ import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { ActionRunner } from "./action-runner.ts";
 import { ConnectServer } from "./connect-server.ts";
+import { RuntimeTokenService } from "./runtime-token-service.ts";
 import { createSecretCodec } from "./secret-codec.ts";
 import { SqliteRuntimeDatabase } from "./sqlite-runtime-store.ts";
 
@@ -18,9 +19,8 @@ const hostname = process.env.HOST ?? "127.0.0.1";
 const publicOrigin = process.env.OOMOL_CONNECT_ORIGIN ?? `http://localhost:${port}`;
 const dataDir = process.env.OOMOL_CONNECT_DATA_DIR ?? join(process.cwd(), "data");
 const secretCodec = createSecretCodec(process.env.OOMOL_CONNECT_ENCRYPTION_KEY);
-const legacyApiToken = process.env.OOMOL_CONNECT_API_TOKEN;
-const adminToken = process.env.OOMOL_CONNECT_ADMIN_TOKEN ?? legacyApiToken;
-const runtimeToken = process.env.OOMOL_CONNECT_RUNTIME_TOKEN ?? legacyApiToken;
+const adminToken = process.env.OOMOL_CONNECT_ADMIN_TOKEN;
+const runtimeToken = process.env.OOMOL_CONNECT_RUNTIME_TOKEN;
 const actionPolicy = new ActionPolicyService({
   allowedActions: parseActionPolicyList(process.env.OOMOL_CONNECT_ALLOWED_ACTIONS),
   blockedActions: parseActionPolicyList(process.env.OOMOL_CONNECT_BLOCKED_ACTIONS),
@@ -34,6 +34,8 @@ const providerLoader = new ProviderLoader();
 const runtimeDatabase = new SqliteRuntimeDatabase(join(dataDir, "connect.sqlite"), {
   secretCodec,
 });
+const runtimeTokens = new RuntimeTokenService(runtimeDatabase.runtimeTokenStore);
+const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
 const oauthClientConfigs = new OAuthClientConfigService({
   catalog,
   origin: publicOrigin,
@@ -63,13 +65,17 @@ const app = new ConnectServer({
     states: runtimeDatabase.oauthStateStore,
   }),
   actions,
+  runtimeTokens,
   staticRoot,
   auth: {
     adminToken,
     runtimeToken,
+    hasRuntimeTokens: hasStoredRuntimeTokens,
+    verifyRuntimeToken: (token) => runtimeTokens.verifyToken(token),
   },
   actionPolicy,
 }).createApp();
+const runtimeAuthConfigured = Boolean(runtimeToken) || (await hasStoredRuntimeTokens());
 
 process.once("SIGINT", () => {
   runtimeDatabase.close();
@@ -92,8 +98,10 @@ serve(
     if (!adminToken) {
       console.warn("local admin authentication is disabled; set OOMOL_CONNECT_ADMIN_TOKEN to require bearer tokens");
     }
-    if (!runtimeToken) {
-      console.warn("runtime API authentication is disabled; set OOMOL_CONNECT_RUNTIME_TOKEN to require bearer tokens");
+    if (!runtimeAuthConfigured) {
+      console.warn(
+        "runtime API authentication is disabled; create a runtime token in the web console or set OOMOL_CONNECT_RUNTIME_TOKEN",
+      );
     }
     if (!secretCodec.encrypted) {
       console.warn(
