@@ -1,10 +1,9 @@
-import { readFile, stat } from "node:fs/promises";
-import { basename, extname } from "node:path";
-
-import type { CredentialValidationResult, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidationResult } from "../../core/types.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 import type { GladiaActionName } from "./actions.ts";
 
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname } from "node:path";
 import {
   compactObject,
   optionalBoolean,
@@ -15,14 +14,8 @@ import {
   requiredString,
 } from "../../core/cast.ts";
 import { assertPublicHttpUrl } from "../../core/request.ts";
-import {
-  defineApiKeyProviderExecutors,
-  ProviderRequestError,
-  providerUserAgent,
-  readTransitFileInput,
-} from "../provider-runtime.ts";
+import { ProviderRequestError, providerUserAgent, readTransitFileInput } from "../provider-runtime.ts";
 
-const service = "gladia";
 const gladiaApiBaseUrl = "https://api.gladia.io";
 const gladiaPreRecordedPath = "/v2/pre-recorded";
 const gladiaUploadPath = "/v2/upload";
@@ -52,8 +45,6 @@ export const gladiaActionHandlers: Record<GladiaActionName, GladiaActionHandler>
     return deleteTranscription(input, context);
   },
 };
-
-export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, gladiaActionHandlers);
 
 export async function validateGladiaCredential(
   input: { apiKey: string },
@@ -269,7 +260,10 @@ function buildStartTranscriptionBody(input: Record<string, unknown>): Record<str
   });
 }
 
-function buildFeatureConfig(value: unknown, arrayKey?: string): { enabled?: boolean; config?: Record<string, unknown> } {
+function buildFeatureConfig(
+  value: unknown,
+  arrayKey?: string,
+): { enabled?: boolean; config?: Record<string, unknown> } {
   if (value === undefined) {
     return {};
   }
@@ -613,11 +607,7 @@ async function readMaybeJsonPayload(response: Response): Promise<unknown> {
   }
 }
 
-function createGladiaError(
-  response: Response,
-  payload: unknown,
-  phase: GladiaRequestPhase,
-): ProviderRequestError {
+function createGladiaError(response: Response, payload: unknown, phase: GladiaRequestPhase): ProviderRequestError {
   const message = extractGladiaErrorMessage(payload) ?? `Gladia request failed with ${response.status}`;
 
   if (response.status === 401 || response.status === 403) {

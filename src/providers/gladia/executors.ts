@@ -1,8 +1,10 @@
-import type { CredentialValidators } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
 
-import { validateGladiaCredential } from "./runtime.ts";
+import { defineApiKeyProviderExecutors } from "../provider-runtime.ts";
+import { gladiaActionHandlers, validateGladiaCredential } from "./runtime.ts";
 
-export { executors } from "./runtime.ts";
+const service = "gladia";
+export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, gladiaActionHandlers);
 
 export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {

@@ -1,4 +1,4 @@
-import type { CredentialValidationResult, ExecutionContext, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidationResult } from "../../core/types.ts";
 import type { GiteaActionName } from "./actions.ts";
 
 import {
@@ -10,21 +10,15 @@ import {
   positiveInteger,
   requiredString,
 } from "../../core/cast.ts";
-import {
-  defineProviderExecutors,
-  providerUserAgent,
-  ProviderRequestError,
-  requireApiKeyCredential,
-} from "../provider-runtime.ts";
+import { providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
 
-const service = "gitea";
 const giteaApiSegment = "api/v1";
 const giteaValidationPath = "/user";
 
 type GiteaRequestPhase = "validate" | "execute";
 type GiteaQueryValue = string | number | boolean | undefined;
 
-interface GiteaActionContext {
+export interface GiteaActionContext {
   apiKey: string;
   baseUrl: string;
   fetcher: typeof fetch;
@@ -62,24 +56,6 @@ export const giteaActionHandlers: Record<GiteaActionName, GiteaActionHandler> = 
     return createIssueComment(input, context);
   },
 };
-
-export const executors: ProviderExecutors = defineProviderExecutors<GiteaActionContext>({
-  service,
-  handlers: giteaActionHandlers,
-  async createContext(context: ExecutionContext, fetcher: typeof fetch): Promise<GiteaActionContext> {
-    const credential = await requireApiKeyCredential(context, service);
-    return {
-      apiKey: credential.apiKey,
-      baseUrl: resolveBaseUrl({
-        values: credential.values,
-        metadata: credential.metadata,
-      }),
-      fetcher,
-      signal: context.signal,
-    };
-  },
-  fallbackMessage: "Gitea request failed.",
-});
 
 export async function validateGiteaCredential(
   input: { apiKey: string; values: Record<string, string> },
@@ -440,7 +416,10 @@ function normalizeGiteaBaseUrl(value: string | undefined): string {
   return `${parsed.origin}${parsed.pathname === "/" ? "" : parsed.pathname}`;
 }
 
-function resolveBaseUrl(input: { values: Record<string, string>; metadata: Record<string, unknown> }): string {
+export function resolveGiteaBaseUrl(input: {
+  values: Record<string, string>;
+  metadata: Record<string, unknown>;
+}): string {
   const baseUrl = optionalString(input.metadata.baseUrl) ?? optionalString(input.values.baseUrl);
   if (!baseUrl) {
     throw new ProviderRequestError(500, "gitea provider metadata is missing baseUrl");
