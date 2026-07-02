@@ -843,8 +843,7 @@ export const githubActions: ActionDefinition[] = [
   }),
   action({
     name: "search_issues_and_pull_requests",
-    description:
-      "Search GitHub issues and pull requests with raw GitHub search syntax or structured filters close to Composio pull-request search.",
+    description: "Search GitHub issues and pull requests with raw GitHub search syntax or structured filters.",
     requiredScopes: [],
     inputSchema: s.object({
       query: s.string(),

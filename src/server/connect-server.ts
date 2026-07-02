@@ -1,7 +1,7 @@
-import type { CatalogStore } from "../catalog-store.ts";
+import type { CatalogStore, RuntimeActionDefinition } from "../catalog-store.ts";
 import type { ConnectionService } from "../connection-service.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
-import type { ActionSearchIndexProvider } from "../core/action-search.ts";
+import type { ActionSearchIndexProvider, ActionSearchResult } from "../core/action-search.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
 import type { ITransitFileService } from "./files/transit-file-store.ts";
@@ -252,10 +252,12 @@ export class ConnectServer {
 
     const index = await this.actionSearch.get();
     return context.json(
-      searchActions(index, query.q, {
-        service: query.service,
-        limit: query.limit,
-      }),
+      this.serializeSearchResults(
+        searchActions(index, query.q, {
+          service: query.service,
+          limit: query.limit,
+        }),
+      ),
     );
   }
 
@@ -323,14 +325,17 @@ export class ConnectServer {
       service: query.service,
       limit: query.limit,
     });
-    return writeRuntimeSuccess(
-      context,
-      results.map((result) => ({
-        service: result.service,
-        name: result.name,
-        description: result.description,
-      })),
-    );
+    return writeRuntimeSuccess(context, this.serializeSearchResults(results));
+  }
+
+  private serializeSearchResults(results: ActionSearchResult[]): RuntimeActionSearchResult[] {
+    return results.flatMap((result) => {
+      const action = this.options.catalog.actionsById.get(result.id);
+      if (!action) {
+        return [];
+      }
+      return [serializeActionSearchResult(result, action)];
+    });
   }
 
   private getRuntimeAction(context: Context, actionId: string): Response {
@@ -641,6 +646,29 @@ type RunLogListQuery =
       ok: false;
       message: string;
     };
+
+interface RuntimeActionSearchResult {
+  id: string;
+  service: string;
+  name: string;
+  description: string;
+  inputSchema: RuntimeActionDefinition["inputSchema"];
+  outputSchema: RuntimeActionDefinition["outputSchema"];
+}
+
+function serializeActionSearchResult(
+  result: ActionSearchResult,
+  action: RuntimeActionDefinition,
+): RuntimeActionSearchResult {
+  return {
+    id: result.id,
+    service: result.service,
+    name: result.name,
+    description: result.description,
+    inputSchema: action.inputSchema,
+    outputSchema: action.outputSchema,
+  };
+}
 
 function readRunLogListInput(context: Context): RunLogListQuery {
   const rawLimit = optionalString(context.req.query("limit"));

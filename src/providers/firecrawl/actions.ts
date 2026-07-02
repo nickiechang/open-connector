@@ -574,7 +574,7 @@ export const firecrawlActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "crawl",
-    description: "Start a Firecrawl crawl job with compatibility fields accepted from the Composio crawl action.",
+    description: "Start a Firecrawl crawl job with compatibility input fields.",
     inputSchema: crawlInput,
     outputSchema: jobStartSchema,
   }),
@@ -592,7 +592,7 @@ export const firecrawlActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_the_status_of_a_crawl_job",
-    description: "Compatibility alias of crawl_get for the Composio crawl status action.",
+    description: "Compatibility alias of crawl_get for the crawl status action name.",
     inputSchema: idInput,
     outputSchema: pagedJobStatusSchema,
   }),
@@ -610,7 +610,7 @@ export const firecrawlActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "crawl_delete",
-    description: "Compatibility alias of crawl_cancel for the Composio crawl delete action.",
+    description: "Compatibility alias of crawl_cancel for the crawl delete action name.",
     inputSchema: idInput,
     outputSchema: cancelResultSchema,
   }),

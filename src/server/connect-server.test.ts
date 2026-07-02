@@ -1,5 +1,6 @@
 import type { IConnectionStore, StoredConnection } from "../connection-service.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
+import type { ActionSearchIndexProvider } from "../core/action-search.ts";
 import type { ActionDefinition, ActionExecutor, ProviderDefinition, ResolvedCredential } from "../core/types.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
@@ -14,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
 import { ConnectionService } from "../connection-service.ts";
 import { ActionPolicyService as LocalActionPolicyService } from "../core/action-policy.ts";
+import { buildActionSearchIndex } from "../core/action-search.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
@@ -651,24 +653,42 @@ describe("ConnectServer", () => {
 
     const apiSearch = await app.request("/api/actions/search?q=echo");
     expect(apiSearch.status).toBe(200);
-    const apiSearchResults = (await apiSearch.json()) as Array<{ id: string; service: string; name: string }>;
+    const apiSearchResults = (await apiSearch.json()) as Array<{
+      id: string;
+      service: string;
+      name: string;
+      inputSchema: Record<string, unknown>;
+      outputSchema: Record<string, unknown>;
+    }>;
     expect(apiSearchResults[0]).toMatchObject({
       id: "example.echo",
       service: "example",
       name: "echo",
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
     });
 
     const runtimeSearch = await app.request("/v1/actions/search?q=echo");
     expect(runtimeSearch.status).toBe(200);
     const runtimeSearchBody = (await runtimeSearch.json()) as {
       success: boolean;
-      data: Array<{ service: string; name: string; description: string }>;
+      data: Array<{
+        id: string;
+        service: string;
+        name: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        outputSchema: Record<string, unknown>;
+      }>;
     };
     expect(runtimeSearchBody.success).toBe(true);
     expect(runtimeSearchBody.data[0]).toMatchObject({
+      id: "example.echo",
       service: "example",
       name: "echo",
       description: "Echo input.",
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
     });
 
     const action = await app.request("/v1/actions/example.echo");
@@ -700,6 +720,44 @@ describe("ConnectServer", () => {
         actionId: "example.echo",
       },
     });
+  });
+
+  it("drops stale action search index hits that are missing from the catalog", async () => {
+    const staleAction: ActionDefinition = {
+      ...echoAction,
+      id: "missing.ghost",
+      service: "missing",
+      name: "ghost",
+      description: "Echo ghost input.",
+    };
+    const actionSearch: ActionSearchIndexProvider = {
+      get: async () => buildActionSearchIndex([echoAction, staleAction]),
+    };
+    const app = createTestServer(
+      [
+        {
+          ...apiKeyProvider,
+          actions: [echoAction],
+        },
+      ],
+      { actionSearch },
+    ).createApp();
+
+    const apiSearch = await app.request("/api/actions/search?q=echo");
+    expect(apiSearch.status).toBe(200);
+    const apiResults = (await apiSearch.json()) as Array<{ id: string; inputSchema: Record<string, unknown> }>;
+    expect(apiResults.map((result) => result.id)).toEqual(["example.echo"]);
+    expect(apiResults[0]?.inputSchema).toEqual({ type: "object" });
+
+    const runtimeSearch = await app.request("/v1/actions/search?q=echo");
+    expect(runtimeSearch.status).toBe(200);
+    const runtimeBody = (await runtimeSearch.json()) as {
+      success: boolean;
+      data: Array<{ id: string; outputSchema: Record<string, unknown> }>;
+    };
+    expect(runtimeBody.success).toBe(true);
+    expect(runtimeBody.data.map((result) => result.id)).toEqual(["example.echo"]);
+    expect(runtimeBody.data[0]?.outputSchema).toEqual({ type: "object" });
   });
 
   it("serves v1 apps and authenticated service views without leaking credentials", async () => {
@@ -929,6 +987,7 @@ describe("ConnectServer", () => {
 interface CreateTestServerOptions {
   auth?: { adminToken?: string; runtimeToken?: string };
   actionPolicy?: ActionPolicyService;
+  actionSearch?: ActionSearchIndexProvider;
   providerLoader?: IProviderLoader;
   runtimeTokens?: RuntimeTokenService;
   runs?: MemoryRunLogStore;
@@ -992,6 +1051,7 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
       verifyRuntimeToken: (token) => runtimeTokens.verifyToken(token),
     },
     actionPolicy: options.actionPolicy,
+    actionSearch: options.actionSearch,
   });
 }
 
