@@ -36,6 +36,18 @@ definitions and executors.
 - Runtime controls for connection identity, scopes, runtime tokens, action allow/block policies,
   temporary file transit, and redacted run logs.
 
+## Where It Fits
+
+OpenConnector is designed for products where agents need to act inside the SaaS tools customers
+already use, while keeping credentials, scopes, schemas, and execution logs in a controlled runtime.
+
+- Agent products that need a reusable connector layer across work apps, developer tools, data
+  systems, communication platforms, and AI services.
+- SaaS products that want to add agent workflows without turning every external API into a custom
+  integration project.
+- Teams that need a portable path from local development to Cloudflare-compatible, hosted, private,
+  or self-hosted deployment.
+
 ## Developer Tools
 
 | Tool                                                        | Use it for                                                                                                    |

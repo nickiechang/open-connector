@@ -30,6 +30,15 @@ provider definition 和 executor。
   [oo CLI](https://github.com/oomol-lab/oo-cli)、MCP、HTTP API、OpenAPI 和本地 Web 控制台。
 - 运行时控制能力包括连接身份、scope、runtime token、action allow/block policy、临时文件中转和脱敏运行日志。
 
+## 适合什么场景
+
+OpenConnector 更适合那些需要让 Agent 进入用户现有 SaaS 工作流的产品，同时把 credential、scope、schema
+和执行日志留在一个可控运行时边界内。
+
+- 需要在工作应用、开发者工具、数据系统、沟通平台和 AI 服务之间复用 connector 层的 Agent 产品。
+- 想加入 Agent workflow，但不希望把每一家外部 API 都变成独立集成项目的 SaaS 产品。
+- 需要从本地开发平滑走向 Cloudflare 兼容部署、托管服务、私有化或自托管的团队。
+
 ## 开发者工具
 
 | 工具                                                        | 用途                                                                                     |
